@@ -57,6 +57,10 @@ easy IPC, much more QoL stuff than other compositors and more...
 - Native IME and Input Panels Support
 - and much more...
 
+# Fork specific changes
+
+- Added a built-in socket for simplified global inputs for windows/programs like key overlays
+
 <br>
 <br>
 

@@ -60,7 +60,9 @@ easy IPC, much more QoL stuff than other compositors and more...
 # Fork specific changes
 
 - Added a built-in socket for simplified global inputs for windows/programs
-#NOTE
+
+# NOTE
+
 It currently works by editing InputManager.cpp inside src/managers/input, adding a socket that exports raw keyboard data as unfiltered 8-byte packets before any Hyprland-specific input logic runs.
 That means it requires handling inputs through a custom socket — which in turn meant rewriting half of the key overlay app I made this for, just to make it cooperate.
 

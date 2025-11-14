@@ -61,8 +61,10 @@ easy IPC, much more QoL stuff than other compositors and more...
 
 - Added a built-in socket for simplified global inputs for windows/programs
 #NOTE
-This is an incredibly stupid way to do this. It requires handling inputs through a custom socket, which meant rewriting half of the key overlay app just to make it cooperate.
-It’s also a major Wayland/Hyprland security violation, since it exposes raw keyboard data system-wide.
+It currently works by editing InputManager.cpp inside src/managers/input, adding a socket that exports raw keyboard data as unfiltered 8-byte packets before any Hyprland-specific input logic runs.
+That means it requires handling inputs through a custom socket — which in turn meant rewriting half of the key overlay app I made this for, just to make it cooperate.
+
+It’s also a _major_ Wayland/Hyprland security violation, since it exposes raw keyboard data system-wide.
 
 I’m working on a daemon + wrapper so inputs can be safely redirected to any program via a terminal command instead of black-magicking it into the compositor.
 

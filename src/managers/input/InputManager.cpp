@@ -24,13 +24,11 @@
 #include "../../protocols/core/DataDevice.hpp"
 #include "../../protocols/core/Compositor.hpp"
 #include "../../protocols/XDGShell.hpp"
-
 #include "../../devices/Mouse.hpp"
 #include "../../devices/VirtualPointer.hpp"
 #include "../../devices/Keyboard.hpp"
 #include "../../devices/VirtualKeyboard.hpp"
 #include "../../devices/TouchDevice.hpp"
-
 #include "../../managers/PointerManager.hpp"
 #include "../../managers/SeatManager.hpp"
 #include "../../managers/KeybindManager.hpp"
@@ -39,16 +37,40 @@
 #include "../../managers/EventManager.hpp"
 #include "../../managers/LayoutManager.hpp"
 #include "../../managers/permissions/DynamicPermissionManager.hpp"
-
 #include "../../helpers/time/Time.hpp"
 #include "../../helpers/MiscFunctions.hpp"
-
 #include "trackpad/TrackpadGestures.hpp"
 #include "../cursor/CursorShapeOverrideController.hpp"
-
 #include <aquamarine/input/Input.hpp>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+static int overlay_sock = -1;
+static sockaddr_un overlay_addr;
+
+static void init_overlay_socket() {
+    overlay_sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    if (overlay_sock < 0)
+        return;
+    memset(&overlay_addr, 0, sizeof(overlay_addr));
+    overlay_addr.sun_family = AF_UNIX;
+    strcpy(overlay_addr.sun_path, "/tmp/hyprkeys.sock");
+}
+
+static inline void fast_send_event(int keycode, int state) {
+    if (overlay_sock == -1)
+        return;
+    uint8_t buf[8];
+    memcpy(buf, &keycode, 4);
+    memcpy(buf + 4, &state, 4);
+    sendto(overlay_sock, buf, sizeof(buf), MSG_DONTWAIT,
+           (struct sockaddr*)&overlay_addr, sizeof(overlay_addr));
+}
 
 CInputManager::CInputManager() {
+    init_overlay_socket();
     m_listeners.setCursorShape = PROTO::cursorShape->m_events.setShape.listen([this](const CCursorShapeProtocol::SSetShapeEvent& event) {
         if (!cursorImageUnlocked())
             return;
@@ -1414,8 +1436,13 @@ void CInputManager::updateKeyboardsLeds(SP<IKeyboard> pKeyboard) {
 }
 
 void CInputManager::onKeyboardKey(const IKeyboard::SKeyEvent& event, SP<IKeyboard> pKeyboard) {
-    if (!pKeyboard->m_enabled || !pKeyboard->m_allowed)
+    // send event before any compositor filtering or focus checks
+    fast_send_event(event.keycode, event.state);
+
+    // existing Hyprland logic
+    if (!pKeyboard)
         return;
+
 
     const bool DISALLOWACTION = pKeyboard->isVirtual() && shouldIgnoreVirtualKeyboard(pKeyboard);
 

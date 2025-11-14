@@ -59,10 +59,14 @@ easy IPC, much more QoL stuff than other compositors and more...
 
 # Fork specific changes
 
-- Added a built-in socket for simplified global inputs for windows/programs like key overlays
+- Added a built-in socket for simplified global inputs for windows/programs
+#NOTE
+This is an incredibly stupid way to do this. It requires handling inputs through a custom socket, which meant rewriting half of the key overlay app just to make it cooperate.
+It’s also a major Wayland/Hyprland security violation, since it exposes raw keyboard data system-wide.
 
-<br>
-<br>
+I’m working on a daemon + wrapper so inputs can be safely redirected to any program via a terminal command instead of black-magicking it into the compositor.
+
+Also, this entire thing exists because I got annoyed one weekend and couldn’t make udev behave, so don’t expect release dates or stability.
 
 <div align = center>
 

@@ -24,11 +24,13 @@
 #include "../../protocols/core/DataDevice.hpp"
 #include "../../protocols/core/Compositor.hpp"
 #include "../../protocols/XDGShell.hpp"
+
 #include "../../devices/Mouse.hpp"
 #include "../../devices/VirtualPointer.hpp"
 #include "../../devices/Keyboard.hpp"
 #include "../../devices/VirtualKeyboard.hpp"
 #include "../../devices/TouchDevice.hpp"
+
 #include "../../managers/PointerManager.hpp"
 #include "../../managers/SeatManager.hpp"
 #include "../../managers/KeybindManager.hpp"
@@ -37,11 +39,15 @@
 #include "../../managers/EventManager.hpp"
 #include "../../managers/LayoutManager.hpp"
 #include "../../managers/permissions/DynamicPermissionManager.hpp"
+
 #include "../../helpers/time/Time.hpp"
 #include "../../helpers/MiscFunctions.hpp"
+
 #include "trackpad/TrackpadGestures.hpp"
 #include "../cursor/CursorShapeOverrideController.hpp"
+
 #include <aquamarine/input/Input.hpp>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>

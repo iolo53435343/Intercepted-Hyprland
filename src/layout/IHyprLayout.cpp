@@ -5,6 +5,7 @@
 #include "../config/ConfigValue.hpp"
 #include "../config/ConfigManager.hpp"
 #include "../desktop/Window.hpp"
+#include "../desktop/state/FocusState.hpp"
 #include "../protocols/XDGShell.hpp"
 #include "../protocols/core/Compositor.hpp"
 #include "../xwayland/XSurface.hpp"
@@ -13,11 +14,12 @@
 #include "../managers/EventManager.hpp"
 #include "../managers/HookSystemManager.hpp"
 #include "../managers/cursor/CursorShapeOverrideController.hpp"
+#include "../desktop/rule/windowRule/WindowRule.hpp"
 
 void IHyprLayout::onWindowCreated(PHLWINDOW pWindow, eDirection direction) {
     CBox       desiredGeometry = g_pXWaylandManager->getGeometryForWindow(pWindow);
 
-    const bool HASPERSISTENTSIZE = std::ranges::any_of(pWindow->m_matchedRules, [](const auto& rule) { return rule->m_ruleType == CWindowRule::RULE_PERSISTENTSIZE; });
+    const bool HASPERSISTENTSIZE = pWindow->m_ruleApplicator->persistentSize().valueOrDefault();
 
     const auto STOREDSIZE = HASPERSISTENTSIZE ? g_pConfigManager->getStoredFloatingSize(pWindow) : std::nullopt;
 
@@ -77,7 +79,7 @@ void IHyprLayout::onWindowRemoved(PHLWINDOW pWindow) {
 
             pWindow->updateWindowDecos();
             PWINDOWPREV->getGroupCurrent()->updateWindowDecos();
-            g_pCompositor->updateWindowAnimatedDecorationValues(pWindow);
+            pWindow->updateDecorationValues();
 
             return;
         }
@@ -107,6 +109,9 @@ void IHyprLayout::onWindowCreatedFloating(PHLWINDOW pWindow) {
         xy                = g_pXWaylandManager->xwaylandToWaylandCoords(xy);
         desiredGeometry.x = xy.x;
         desiredGeometry.y = xy.y;
+    } else if (pWindow->m_ruleApplicator->persistentSize().valueOrDefault()) {
+        desiredGeometry.w = pWindow->m_lastFloatingSize.x;
+        desiredGeometry.h = pWindow->m_lastFloatingSize.y;
     }
 
     static auto PXWLFORCESCALEZERO = CConfigValue<Hyprlang::INT>("xwayland:force_zero_scaling");
@@ -204,8 +209,8 @@ void IHyprLayout::onWindowCreatedFloating(PHLWINDOW pWindow) {
 
 bool IHyprLayout::onWindowCreatedAutoGroup(PHLWINDOW pWindow) {
     static auto     PAUTOGROUP       = CConfigValue<Hyprlang::INT>("group:auto_group");
-    const PHLWINDOW OPENINGON        = g_pCompositor->m_lastWindow.lock() && g_pCompositor->m_lastWindow->m_workspace == pWindow->m_workspace ?
-               g_pCompositor->m_lastWindow.lock() :
+    const PHLWINDOW OPENINGON        = Desktop::focusState()->window() && Desktop::focusState()->window()->m_workspace == pWindow->m_workspace ?
+               Desktop::focusState()->window() :
                (pWindow->m_workspace ? pWindow->m_workspace->getFirstWindow() : nullptr);
     const bool      FLOATEDINTOTILED = pWindow->m_isFloating && OPENINGON && !OPENINGON->m_isFloating;
     const bool      SWALLOWING       = pWindow->m_swallowed || pWindow->m_groupSwallowed;
@@ -300,7 +305,7 @@ void IHyprLayout::onBeginDragWindow() {
 
     g_pKeybindManager->shadowKeybinds();
 
-    g_pCompositor->focusWindow(DRAGGINGWINDOW);
+    Desktop::focusState()->rawWindowFocus(DRAGGINGWINDOW);
     g_pCompositor->changeWindowZOrder(DRAGGINGWINDOW, true);
 }
 
@@ -390,7 +395,7 @@ void IHyprLayout::onEndDragWindow() {
     }
 
     g_pHyprRenderer->damageWindow(DRAGGINGWINDOW);
-    g_pCompositor->focusWindow(DRAGGINGWINDOW);
+    Desktop::focusState()->fullWindowFocus(DRAGGINGWINDOW);
 
     g_pInputManager->m_wasDraggingWindow = false;
 }
@@ -637,10 +642,10 @@ void IHyprLayout::onMouseMove(const Vector2D& mousePos) {
     } else if (g_pInputManager->m_dragMode == MBIND_RESIZE || g_pInputManager->m_dragMode == MBIND_RESIZE_FORCE_RATIO || g_pInputManager->m_dragMode == MBIND_RESIZE_BLOCK_RATIO) {
         if (DRAGGINGWINDOW->m_isFloating) {
 
-            Vector2D MINSIZE = DRAGGINGWINDOW->requestedMinSize().clamp(DRAGGINGWINDOW->m_windowData.minSize.valueOr(Vector2D(MIN_WINDOW_SIZE, MIN_WINDOW_SIZE)));
+            Vector2D MINSIZE = DRAGGINGWINDOW->requestedMinSize().clamp(DRAGGINGWINDOW->m_ruleApplicator->minSize().valueOr(Vector2D(MIN_WINDOW_SIZE, MIN_WINDOW_SIZE)));
             Vector2D MAXSIZE;
-            if (DRAGGINGWINDOW->m_windowData.maxSize.hasValue())
-                MAXSIZE = DRAGGINGWINDOW->requestedMaxSize().clamp({}, DRAGGINGWINDOW->m_windowData.maxSize.value());
+            if (DRAGGINGWINDOW->m_ruleApplicator->maxSize().hasValue())
+                MAXSIZE = DRAGGINGWINDOW->requestedMaxSize().clamp({}, DRAGGINGWINDOW->m_ruleApplicator->maxSize().value());
             else
                 MAXSIZE = DRAGGINGWINDOW->requestedMaxSize().clamp({}, Vector2D(std::numeric_limits<double>::max(), std::numeric_limits<double>::max()));
 
@@ -657,7 +662,7 @@ void IHyprLayout::onMouseMove(const Vector2D& mousePos) {
                 newSize = newSize + Vector2D(-DELTA.x, DELTA.y);
 
             eMouseBindMode mode = g_pInputManager->m_dragMode;
-            if (DRAGGINGWINDOW->m_windowData.keepAspectRatio.valueOrDefault() && mode != MBIND_RESIZE_BLOCK_RATIO)
+            if (DRAGGINGWINDOW->m_ruleApplicator->keepAspectRatio().valueOrDefault() && mode != MBIND_RESIZE_BLOCK_RATIO)
                 mode = MBIND_RESIZE_FORCE_RATIO;
 
             if (m_beginDragSizeXY.x >= 1 && m_beginDragSizeXY.y >= 1 && mode == MBIND_RESIZE_FORCE_RATIO) {
@@ -781,7 +786,7 @@ void IHyprLayout::changeWindowFloatingMode(PHLWINDOW pWindow) {
         // fix pseudo leaving artifacts
         g_pHyprRenderer->damageMonitor(pWindow->m_monitor.lock());
 
-        if (pWindow == g_pCompositor->m_lastWindow)
+        if (pWindow == Desktop::focusState()->window())
             m_lastTiledWindow = pWindow;
     } else {
         onWindowRemovedTiling(pWindow);
@@ -803,14 +808,15 @@ void IHyprLayout::changeWindowFloatingMode(PHLWINDOW pWindow) {
 
         g_pHyprRenderer->damageMonitor(pWindow->m_monitor.lock());
 
-        pWindow->unsetWindowData(PRIORITY_LAYOUT);
+        pWindow->m_ruleApplicator->resetProps(Desktop::Rule::RULE_PROP_ALL, Desktop::Types::PRIORITY_LAYOUT);
         pWindow->updateWindowData();
 
         if (pWindow == m_lastTiledWindow)
             m_lastTiledWindow.reset();
     }
 
-    g_pCompositor->updateWindowAnimatedDecorationValues(pWindow);
+    pWindow->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_ON_WORKSPACE | Desktop::Rule::RULE_PROP_FLOATING);
+    pWindow->updateDecorationValues();
     pWindow->updateToplevel();
     g_pHyprRenderer->damageWindow(pWindow);
 }
@@ -847,7 +853,7 @@ void IHyprLayout::fitFloatingWindowOnMonitor(PHLWINDOW w, std::optional<CBox> tb
 }
 
 void IHyprLayout::moveActiveWindow(const Vector2D& delta, PHLWINDOW pWindow) {
-    const auto PWINDOW = pWindow ? pWindow : g_pCompositor->m_lastWindow.lock();
+    const auto PWINDOW = pWindow ? pWindow : Desktop::focusState()->window();
 
     if (!validMapped(PWINDOW))
         return;
@@ -885,7 +891,7 @@ PHLWINDOW IHyprLayout::getNextWindowCandidate(PHLWINDOW pWindow) {
         // find whether there is a floating window below this one
         for (auto const& w : g_pCompositor->m_windows) {
             if (w->m_isMapped && !w->isHidden() && w->m_isFloating && !w->isX11OverrideRedirect() && w->m_workspace == pWindow->m_workspace && !w->m_X11ShouldntFocus &&
-                !w->m_windowData.noFocus.valueOrDefault() && w != pWindow) {
+                !w->m_ruleApplicator->noFocus().valueOrDefault() && w != pWindow) {
                 if (VECINRECT((pWindow->m_size / 2.f + pWindow->m_position), w->m_position.x, w->m_position.y, w->m_position.x + w->m_size.x, w->m_position.y + w->m_size.y)) {
                     return w;
                 }
@@ -904,7 +910,7 @@ PHLWINDOW IHyprLayout::getNextWindowCandidate(PHLWINDOW pWindow) {
         // if not, floating window
         for (auto const& w : g_pCompositor->m_windows) {
             if (w->m_isMapped && !w->isHidden() && w->m_isFloating && !w->isX11OverrideRedirect() && w->m_workspace == pWindow->m_workspace && !w->m_X11ShouldntFocus &&
-                !w->m_windowData.noFocus.valueOrDefault() && w != pWindow)
+                !w->m_ruleApplicator->noFocus().valueOrDefault() && w != pWindow)
                 return w;
         }
 
@@ -922,7 +928,7 @@ PHLWINDOW IHyprLayout::getNextWindowCandidate(PHLWINDOW pWindow) {
         pWindowCandidate = PWORKSPACE->getFirstWindow();
 
     if (!pWindowCandidate || pWindow == pWindowCandidate || !pWindowCandidate->m_isMapped || pWindowCandidate->isHidden() || pWindowCandidate->m_X11ShouldntFocus ||
-        pWindowCandidate->isX11OverrideRedirect() || pWindowCandidate->m_monitor != g_pCompositor->m_lastMonitor)
+        pWindowCandidate->isX11OverrideRedirect() || pWindowCandidate->m_monitor != Desktop::focusState()->monitor())
         return nullptr;
 
     return pWindowCandidate;
@@ -944,16 +950,16 @@ void IHyprLayout::bringWindowToTop(PHLWINDOW pWindow) {
 
 void IHyprLayout::requestFocusForWindow(PHLWINDOW pWindow) {
     bringWindowToTop(pWindow);
-    g_pCompositor->focusWindow(pWindow);
+    Desktop::focusState()->fullWindowFocus(pWindow);
     g_pCompositor->warpCursorTo(pWindow->middle());
 }
 
 Vector2D IHyprLayout::predictSizeForNewWindowFloating(PHLWINDOW pWindow) { // get all rules, see if we have any size overrides.
     Vector2D sizeOverride = {};
-    if (g_pCompositor->m_lastMonitor) {
+    if (Desktop::focusState()->monitor()) {
 
         // If `persistentsize` is set, use the stored size if available.
-        const bool HASPERSISTENTSIZE = std::ranges::any_of(pWindow->m_matchedRules, [](const auto& rule) { return rule->m_ruleType == CWindowRule::RULE_PERSISTENTSIZE; });
+        const bool HASPERSISTENTSIZE = pWindow->m_ruleApplicator->persistentSize().valueOrDefault();
 
         const auto STOREDSIZE = HASPERSISTENTSIZE ? g_pConfigManager->getStoredFloatingSize(pWindow) : std::nullopt;
 
@@ -962,27 +968,10 @@ Vector2D IHyprLayout::predictSizeForNewWindowFloating(PHLWINDOW pWindow) { // ge
             return STOREDSIZE.value();
         }
 
-        for (auto const& r : g_pConfigManager->getMatchingRules(pWindow, true, true)) {
-            if (r->m_ruleType != CWindowRule::RULE_SIZE)
-                continue;
-
-            try {
-                const auto  VALUE    = r->m_rule.substr(r->m_rule.find(' ') + 1);
-                const auto  SIZEXSTR = VALUE.substr(0, VALUE.find(' '));
-                const auto  SIZEYSTR = VALUE.substr(VALUE.find(' ') + 1);
-
-                const auto  MAXSIZE = pWindow->requestedMaxSize();
-
-                const float SIZEX = SIZEXSTR == "max" ? std::clamp(MAXSIZE.x, MIN_WINDOW_SIZE, g_pCompositor->m_lastMonitor->m_size.x) :
-                                                        stringToPercentage(SIZEXSTR, g_pCompositor->m_lastMonitor->m_size.x);
-
-                const float SIZEY = SIZEYSTR == "max" ? std::clamp(MAXSIZE.y, MIN_WINDOW_SIZE, g_pCompositor->m_lastMonitor->m_size.y) :
-                                                        stringToPercentage(SIZEYSTR, g_pCompositor->m_lastMonitor->m_size.y);
-
-                sizeOverride = {SIZEX, SIZEY};
-
-            } catch (...) { Debug::log(LOG, "Rule size failed, rule: {} -> {}", r->m_rule, r->m_value); }
-            break;
+        if (!pWindow->m_ruleApplicator->static_.size.empty()) {
+            const auto SIZE = pWindow->calculateExpression(pWindow->m_ruleApplicator->static_.size);
+            if (SIZE)
+                return SIZE.value();
         }
     }
 
@@ -990,17 +979,7 @@ Vector2D IHyprLayout::predictSizeForNewWindowFloating(PHLWINDOW pWindow) { // ge
 }
 
 Vector2D IHyprLayout::predictSizeForNewWindow(PHLWINDOW pWindow) {
-    bool shouldBeFloated = g_pXWaylandManager->shouldBeFloated(pWindow, true);
-
-    if (!shouldBeFloated) {
-        for (auto const& r : g_pConfigManager->getMatchingRules(pWindow, true, true)) {
-            if (r->m_ruleType != CWindowRule::RULE_FLOAT)
-                continue;
-
-            shouldBeFloated = true;
-            break;
-        }
-    }
+    bool     shouldBeFloated = g_pXWaylandManager->shouldBeFloated(pWindow, true) || pWindow->m_ruleApplicator->static_.floating.value_or(false);
 
     Vector2D sizePredicted = {};
 
@@ -1043,7 +1022,7 @@ bool IHyprLayout::updateDragWindow() {
         const auto MOUSECOORDS          = g_pInputManager->getMouseCoordsInternal();
         *DRAGGINGWINDOW->m_realPosition = MOUSECOORDS - DRAGGINGWINDOW->m_realSize->goal() / 2.f;
     } else if (!DRAGGINGWINDOW->m_isFloating && g_pInputManager->m_dragMode == MBIND_MOVE) {
-        Vector2D MINSIZE                   = DRAGGINGWINDOW->requestedMinSize().clamp(DRAGGINGWINDOW->m_windowData.minSize.valueOr(Vector2D(MIN_WINDOW_SIZE, MIN_WINDOW_SIZE)));
+        Vector2D MINSIZE = DRAGGINGWINDOW->requestedMinSize().clamp(DRAGGINGWINDOW->m_ruleApplicator->minSize().valueOr(Vector2D(MIN_WINDOW_SIZE, MIN_WINDOW_SIZE)));
         DRAGGINGWINDOW->m_lastFloatingSize = (DRAGGINGWINDOW->m_realSize->goal() * 0.8489).clamp(MINSIZE, Vector2D{}).floor();
         *DRAGGINGWINDOW->m_realPosition    = g_pInputManager->getMouseCoordsInternal() - DRAGGINGWINDOW->m_realSize->goal() / 2.f;
         if (g_pInputManager->m_dragThresholdReached) {

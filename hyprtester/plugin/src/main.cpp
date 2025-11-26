@@ -11,7 +11,10 @@
 #include <src/managers/input/InputManager.hpp>
 #include <src/managers/PointerManager.hpp>
 #include <src/managers/input/trackpad/TrackpadGestures.hpp>
+#include <src/desktop/rule/windowRule/WindowRuleEffectContainer.hpp>
+#include <src/desktop/rule/windowRule/WindowRuleApplicator.hpp>
 #include <src/Compositor.hpp>
+#include <src/desktop/state/FocusState.hpp>
 #undef private
 
 #include <hyprutils/utils/ScopeGuard.hpp>
@@ -43,7 +46,7 @@ static SDispatchResult test(std::string in) {
 
 // Trigger a snap move event for the active window
 static SDispatchResult snapMove(std::string in) {
-    const auto PLASTWINDOW = g_pCompositor->m_lastWindow.lock();
+    const auto PLASTWINDOW = Desktop::focusState()->window();
     if (!PLASTWINDOW->m_isFloating)
         return {.success = false, .error = "Window must be floating"};
 
@@ -245,6 +248,32 @@ static SDispatchResult keybind(std::string in) {
     return {};
 }
 
+static Desktop::Rule::CWindowRuleEffectContainer::storageType ruleIDX = 0;
+
+//
+static SDispatchResult addRule(std::string in) {
+    ruleIDX = Desktop::Rule::windowEffects()->registerEffect("plugin_rule");
+
+    if (Desktop::Rule::windowEffects()->registerEffect("plugin_rule") != ruleIDX)
+        return {.success = false, .error = "re-registering returned a different id?"};
+    return {};
+}
+
+static SDispatchResult checkRule(std::string in) {
+    const auto PLASTWINDOW = Desktop::focusState()->window();
+
+    if (!PLASTWINDOW)
+        return {.success = false, .error = "No window"};
+
+    if (!PLASTWINDOW->m_ruleApplicator->m_otherProps.props.contains(ruleIDX))
+        return {.success = false, .error = "No rule"};
+
+    if (PLASTWINDOW->m_ruleApplicator->m_otherProps.props[ruleIDX]->effect != "effect")
+        return {.success = false, .error = "Effect isn't \"effect\""};
+
+    return {};
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
@@ -255,6 +284,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addDispatcherV2(PHANDLE, "plugin:test:gesture", ::simulateGesture);
     HyprlandAPI::addDispatcherV2(PHANDLE, "plugin:test:scroll", ::scroll);
     HyprlandAPI::addDispatcherV2(PHANDLE, "plugin:test:keybind", ::keybind);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "plugin:test:add_rule", ::addRule);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "plugin:test:check_rule", ::checkRule);
 
     // init mouse
     g_mouse = CTestMouse::create(false);

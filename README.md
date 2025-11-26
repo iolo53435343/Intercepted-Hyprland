@@ -70,6 +70,9 @@ It’s also a _major_ Wayland/Hyprland security violation, since it exposes raw 
 
 I have published the daemon+wrapper combo (hkd daemon + hk-inject.py wrapper), with the caveat being it does not work with wayland native programs. Usage is simple, once you are running hyprland built from this source, simply run hkd and direct hk-inject.py to a target xwayland window (hk-inject -h for more info)
 
+if you are interested in building the hkd binary from source code (main.go), i recommend using this command:
+`CGO_ENABLED=0 go build -ldflags "-s -w" -o hkd main.go`
+
 Also, this entire thing exists because I got annoyed one weekend and couldn’t make udev behave, so don’t expect perfect stability.
 
 <div align = center>

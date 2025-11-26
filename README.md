@@ -64,13 +64,13 @@ easy IPC, much more QoL stuff than other compositors and more...
 # NOTE
 
 It currently works by editing InputManager.cpp inside src/managers/input, adding a socket that exports raw keyboard data as unfiltered 8-byte packets before any Hyprland-specific input logic runs.
-That means it requires handling inputs through a custom socket — which in turn meant rewriting half of the key overlay app I made this for, just to make it cooperate.
+That means it requires handling inputs through a custom socket — which in turn meant rewriting half of the key overlay app I made this for at the time, just to make it cooperate.
 
 It’s also a _major_ Wayland/Hyprland security violation, since it exposes raw keyboard data system-wide.
 
-I’m working on a daemon + wrapper so inputs can be safely redirected to any program via a terminal command instead of black-magicking it into the compositor.
+I have published the daemon+wrapper combo (hkd daemon + hk-inject.py wrapper), with the caveat being it does not work with wayland native programs. Usage is simple, once you are running hyprland built from this source, simply run hkd and direct hk-inject.py to a target xwayland window (hk-inject -h for more info)
 
-Also, this entire thing exists because I got annoyed one weekend and couldn’t make udev behave, so don’t expect release dates or stability.
+Also, this entire thing exists because I got annoyed one weekend and couldn’t make udev behave, so don’t expect perfect stability.
 
 <div align = center>
 
